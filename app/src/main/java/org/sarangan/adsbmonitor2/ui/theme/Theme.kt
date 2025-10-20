@@ -1,4 +1,4 @@
-package org.sarangan.adsb2.ui.theme
+package org.sarangan.adsbmonitor2.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme

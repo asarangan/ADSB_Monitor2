@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">ADSB Monitor</string>
+    <string name="app_name">ADSB Monitor2</string>
     <string name="zero">0</string>
     <string name="ff_mode">FF Mode</string>
     <string name="open_mode">Open Mode</string>

@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ADSB2"
+rootProject.name = "ADSBMonitor2"
 include(":app")
  

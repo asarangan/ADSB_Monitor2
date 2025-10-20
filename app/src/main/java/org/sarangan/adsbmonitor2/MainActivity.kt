@@ -1,30 +1,25 @@
-package org.sarangan.adsb2
+package org.sarangan.adsbmonitor2
 
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.wifi.WifiManager
-import android.net.wifi.WifiManager.MulticastLock
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import android.widget.Switch
 import android.widget.TextView
 import androidx.activity.ComponentActivity
-//import com.example.myapplication.R
-import org.sarangan.adsb2.R
-import kotlinx.coroutines.withTimeoutOrNull
 import java.math.BigInteger
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.MulticastSocket
 import java.net.SocketTimeoutException
-import java.util.Formatter
 import java.util.Timer
 import java.util.TimerTask
 import kotlin.Exception
 
-const val TAG:String = "ADSB"
+const val TAG:String = "ADSB2"
 
 val stratusDataOpen: ByteArray = byteArrayOf(  //Byte sequence to switch Stratus to GDL-90
     0xC2.toByte(),
@@ -48,17 +43,17 @@ val stratusDataClose: ByteArray =
         0x36.toByte()
     )
 
-//This is the number of packets received for each type of data
+//This is the number of packets received for each type of data (shown on the main screen)
 val packetCount = mutableMapOf<String,Int>("heartbeat" to 0, "gps" to 0, "traffic" to 0, "ahrs" to 0, "uplink" to 0)
 
-//This is a timer (ie stopwatch) for each data type. The indicator turns green when a data is received, and it stays for
+//This is a timer (ie stopwatch) for each data type. The indicator turns green when a data is received, and it stays green for
 //2 seconds, and then turns red. The timer is needed to count for 2 seconds and set it to red when the timer expires.
 //When a new data is received the timer is reset, and starts from zero again.
 val timers = mutableMapOf<String,Timer>("heartbeat" to Timer(), "gps" to Timer(), "traffic" to Timer(), "ahrs" to Timer(), "uplink" to Timer())
 
 
-var switchChange: Boolean = true //This is just a status change boolean. It is set when the switch is moved.
-// We want to run UDPSend when the app starts (with the switch in the ON position)
+var switchChange: Boolean = true //This is just a status change boolean. It is set when the switch is moved. It will make UDPSend to run in the Thread.
+                                // We start with the boolean set to true because we want to run UDPSend when the program starts (with the switch in Open-GDL position)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,15 +66,15 @@ class MainActivity : ComponentActivity() {
         //Get the resource ID for the toggle switch
         val mySwitch = findViewById<Switch>(R.id.switchToggle)
 
-        //Start with the switch set to Open GDL mode
+        //Start with the switch set to Open-GDL mode
         mySwitch.isChecked = true
 
-        //Set the switch color depending on the state
+        //This sets the switch color depending on the state (green for Open-GDL and red for Foreflight mode)
         mySwitch.thumbTintList = ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),
             intArrayOf(Color.GREEN, Color.RED))
 
-        //Any time the switch moved, we set a boolean variable to true (so that the corresponding UDP packet can be sent)
+        //This is the listener for the switch that sets the boolean variable to true, so that the corresponding UDP packet can be sent in the Thread.
         mySwitch.setOnCheckedChangeListener{_, isChecked ->
             switchChange = true
             Log.d(TAG,"Switch changed")
@@ -95,10 +90,11 @@ class MainActivity : ComponentActivity() {
         val wifiManager: WifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
 //        val lock: MulticastLock = wifiManager.createMulticastLock("Log_Tag")
 //        lock.acquire() //Multicast lock is needed because some devices block UDP broadcast
+        //Get the IP number of the Wifi connection
         val longIP = wifiManager.connectionInfo.ipAddress.toLong()
         val byteIP = BigInteger.valueOf(longIP).toByteArray().reversedArray()
         var ipAddress:String?
-        try{    //If the wifi is off, we will get 0 as the address, and the hostAddress function will crash
+        try{    //If the wifi is off, we will get 0 as the address, and the hostAddress function will crash, so we need to catch that.
             ipAddress = InetAddress.getByAddress(byteIP).hostAddress
         }
         catch (e: Exception){//When it crashes, we set the ip to Loopback and flag an IP error
@@ -106,6 +102,7 @@ class MainActivity : ComponentActivity() {
             findViewById<TextView>(R.id.textViewError).text = getString(R.string.IPError)
         }
         Log.d(TAG,"IP Address is $ipAddress")
+        //Next we change the last field of the IP address to 255 so that it will broadcast to all devices on the local net.
         val lastDotIndex = ipAddress.lastIndexOf(".")
         val ipAddress255 = ipAddress.substring(0, lastDotIndex)+".255"
         Log.d(TAG,"Sending IP Address is $ipAddress255")
@@ -118,6 +115,7 @@ class MainActivity : ComponentActivity() {
             //C2 53 FF 56 01 00 6D 36  (UDP Port 41500) to switch to Closed Mode
             Log.d(TAG,"UDPSend start")
             val sendData : ByteArray
+            //If the switch is checked, then we send the Open-GDL packet, else we send the foreflight packet.
             if (mySwitch.isChecked) {
                 sendData = stratusDataOpen
                 Log.d(TAG,"UDPSend - openData")
@@ -126,15 +124,16 @@ class MainActivity : ComponentActivity() {
                 Log.d(TAG,"UDPSend - closeData")
             }
 
+            //Now, we send the packet in port 41500 (this is what Stratus seems to be using)
             val sendPacket = DatagramPacket(
                 sendData,
                 sendData.size,
                 InetAddress.getByName(ipAddress255),
-                41500       //The FF to Open-mode command is sent on port 41500
+                41500
             )
             socketOut.send(sendPacket)
             Log.d(TAG,"UDPSend exit")
-        }//End of UDP Send function
+        }
 
 
 
@@ -142,8 +141,9 @@ class MainActivity : ComponentActivity() {
         ///////////////////////////////////////////////////////////////////////////////////
         //Setup the receive socket
         var socketIn = DatagramSocket()
-        socketIn.soTimeout = 2000 //When Stratus is in Foreflight mode, it transmits in a different port, so this timeout is necessary to prevent a stall
-        //The try below is just to check if port 4000 is accessible. It doesn't really read any data
+        socketIn.soTimeout = 2000
+        //Under openGDL, Stratus3 transmits in port 4000. But when it is in Foreflight mode, it transmits under a different port.
+        //First we check if port 4000 is accessible. It doesn't really read any data, just check if it is accessible, and throw an error if not accessible.
         try {
             socketIn = MulticastSocket(4000) //Most ADSB transmit GDL-90 on port 4000. Otherwise this may need to be changed.
         } catch (e: java.lang.Exception) {
@@ -155,14 +155,13 @@ class MainActivity : ComponentActivity() {
 
 
 
-        //Now start the thread - this runs repeatedly on a separate thread.
+        //Now start a separate thread that runs forever.
         Thread{
             Log.d(TAG,"Thread launch")
             while (true){
-                //Log.d(TAG,"Thread start")
                 try{
                     //Whenever the switch is moved, we send the appropriate open or close UDP packet
-                    //But we should do this only once per toggle so we don't flood the network, so we set the boolean to false after one send
+                    //But we should do this only once per toggle so we don't repeatedly send the same command, so we set the boolean to false after one send
                     if (switchChange){
                         udpSend()
                         switchChange = false
@@ -187,7 +186,7 @@ class MainActivity : ComponentActivity() {
                     }
                     timers[token]?.cancel() //Because we are not able to reset the old timer, we cancel (delete) it.
                     timers[token] = Timer() //Then we create a new timer
-                    timers[token]?.schedule(timerTask, 2000)    //And we assign the task to that timer and set the 2 seconds on it.
+                    timers[token]?.schedule(timerTask, 2000)    //And we assign the task to that timer and set it to expire in 2 seconds.
                 }
 
 
@@ -196,7 +195,7 @@ class MainActivity : ComponentActivity() {
                         socketIn.soTimeout = 2000   //The previously set timeout gets erased after one attempt, so we need to set it again.
                         socketIn.receive(packetIn)  //Read the 64 byte packet
                     }
-                    catch (e: SocketTimeoutException){
+                    catch (e: SocketTimeoutException){  //If there is no data, then this exception will be thrown
                         Log.d(TAG,"Socket time out")
                     }
 
@@ -245,12 +244,11 @@ class MainActivity : ComponentActivity() {
                     }
 
                 }
-                catch (e: Exception){//If we get to this catch, something went wrong. Not sure
+                catch (e: Exception){//If we get to this catch, something went wrong. It could be a variety of reasons
                     Log.d(TAG,"Exception Error")
                     this@MainActivity.runOnUiThread({findViewById<TextView>(R.id.textViewError).text = getString(
                         R.string.runTimeError)})
                 }
-                //Log.d(TAG,"Thread end")
             }
         }.start()
 

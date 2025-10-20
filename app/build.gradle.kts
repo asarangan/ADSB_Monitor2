@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "org.sarangan.adsb2"
+    namespace = "org.sarangan.adsbmonitor2"
     compileSdk = 36
 
     defaultConfig {

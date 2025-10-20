@@ -1,4 +1,4 @@
-package org.sarangan.adsb2
+package org.sarangan.adsbmonitor2
 
 import org.junit.Test
 
