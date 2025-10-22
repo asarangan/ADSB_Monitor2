@@ -43,16 +43,16 @@ val stratusDataClose: ByteArray =
         0x36.toByte()
     )
 
-//This is the number of packets received for each type of data (shown on the main screen)
+//This is the number of packets received for each type of data
 val packetCount = mutableMapOf<String,Int>("heartbeat" to 0, "gps" to 0, "traffic" to 0, "ahrs" to 0, "uplink" to 0)
 
-//This is a timer (ie stopwatch) for each data type. The indicator turns green when a data is received, and it stays green for
+//This is a timer for each data type. The indicator turns green when a data is received, and it stays green for
 //2 seconds, and then turns red. The timer is needed to count for 2 seconds and set it to red when the timer expires.
-//When a new data is received the timer is reset, and starts from zero again.
+//When a new data is received the timer is cancelled and a new timer is created, and starts from zero again.
 val timers = mutableMapOf<String,Timer>("heartbeat" to Timer(), "gps" to Timer(), "traffic" to Timer(), "ahrs" to Timer(), "uplink" to Timer())
 
 
-var switchChange: Boolean = true //This is just a status change boolean. It is set when the switch is moved. It will make UDPSend to run in the Thread.
+var switchChange: Boolean = true //This is a status change boolean. It is set when the switch is moved. It will make UDPSend to run in the Thread.
                                 // We start with the boolean set to true because we want to run UDPSend when the program starts (with the switch in Open-GDL position)
 
 class MainActivity : ComponentActivity() {
@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
                 Log.d(TAG,"UDPSend - closeData")
             }
 
-            //Now, we send the packet in port 41500 (this is what Stratus seems to be using)
+            //Now, we send the packet in port 41500 (this is what Stratus is using)
             val sendPacket = DatagramPacket(
                 sendData,
                 sendData.size,
@@ -142,8 +142,8 @@ class MainActivity : ComponentActivity() {
         //Setup the receive socket
         var socketIn = DatagramSocket()
         socketIn.soTimeout = 2000
-        //Under openGDL, Stratus3 transmits in port 4000. But when it is in Foreflight mode, it transmits under a different port.
-        //First we check if port 4000 is accessible. It doesn't really read any data, just check if it is accessible, and throw an error if not accessible.
+        //Under openGDL, Stratus3 transmits in port 4000. But when it is in Foreflight mode, it transmits in port 41500.
+        //First we check if port 4000 is accessible. We don't really read any data, just check if it is accessible, and throw an error if not accessible.
         try {
             socketIn = MulticastSocket(4000) //Most ADSB transmit GDL-90 on port 4000. Otherwise this may need to be changed.
         } catch (e: java.lang.Exception) {
